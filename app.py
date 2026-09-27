@@ -1,6 +1,51 @@
 import os
+import json
+import urllib.request
+import urllib.parse
+
 import streamlit as st
 from google import genai
+
+def search_wikimedia_images(query, limit=3):
+    params = urllib.parse.urlencode({
+        "action": "query",
+        "generator": "search",
+        "gsrsearch": query,
+        "gsrnamespace": 6,
+        "gsrlimit": limit,
+        "prop": "imageinfo",
+        "iiprop": "url",
+        "format": "json",
+    })
+
+    url = f"https://commons.wikimedia.org/w/api.php?{params}"
+
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "TripGenieAI/1.0"
+        },
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            data = json.loads(response.read().decode())
+
+        images = []
+
+        for page in data.get("query", {}).get("pages", {}).values():
+            image_info = page.get("imageinfo", [])
+
+            if image_info:
+                images.append({
+                    "title": page.get("title", ""),
+                    "url": image_info[0].get("url", ""),
+                })
+
+        return images
+
+    except Exception:
+        return []
 
 st.set_page_config(
     page_title="TripGenie AI",
@@ -352,7 +397,28 @@ IMPORTANT:
 
         answer = response.text
 
-        st.success("Your personalized itinerary is ready! ✈️")
+        images = search_wikimedia_images(destination, limit=3)
+
+        if images:
+            st.markdown("### 📸 Destination Highlights")
+
+        image_cols = st.columns(len(images))
+
+        for col, image in zip(image_cols, images):
+            with col:
+                st.image(
+                    image["url"],
+                    width="stretch"
+                )
+
+                title = image["title"].replace("File:", "").strip()
+
+                st.caption(f"📷 {title}")
+
+                st.markdown(
+                    f"[View source on Wikimedia Commons]({image['url']})"
+                )
+                
 
         left, right = st.columns([3.4, 1], gap="large")
 
