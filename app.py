@@ -584,7 +584,3 @@ if "gallery_images" in st.session_state and st.session_state.gallery_images:
             st.session_state.gallery_continuation = next_continuation
 
             st.rerun()
-st.caption(
-    "TripGenie AI • FFE TiE Entrepreneurship Program 2026 • "
-    "AI-powered travel planning prototype"
-)
