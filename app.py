@@ -6,46 +6,77 @@ import urllib.parse
 import streamlit as st
 from google import genai
 
-def search_wikimedia_images(query, limit=3):
-    params = urllib.parse.urlencode({
-        "action": "query",
-        "generator": "search",
-        "gsrsearch": query,
-        "gsrnamespace": 6,
-        "gsrlimit": limit,
-        "prop": "imageinfo",
-        "iiprop": "url",
-        "format": "json",
-    })
-
-    url = f"https://commons.wikimedia.org/w/api.php?{params}"
-
-    request = urllib.request.Request(
-        url,
-        headers={
-            "User-Agent": "TripGenieAI/1.0"
-        },
-    )
-
+def search_wikimedia_images(query, limit=6, continuation=None):
     try:
+        params_dict = {
+            "action": "query",
+            "generator": "search",
+            "gsrsearch": query,
+            "gsrnamespace": 6,
+            "gsrlimit": limit,
+            "prop": "imageinfo",
+            "iiprop": "url|mime",
+            "iiurlwidth": 900,
+            "format": "json",
+        }
+
+        # Add Wikimedia continuation parameters
+        # when loading the next page.
+        if continuation:
+            params_dict.update(continuation)
+
+        params = urllib.parse.urlencode(params_dict)
+
+        url = f"https://commons.wikimedia.org/w/api.php?{params}"
+
+        request = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": "TripGenieAI/1.0"
+            },
+        )
+
         with urllib.request.urlopen(request, timeout=10) as response:
             data = json.loads(response.read().decode())
 
         images = []
+        seen_titles = set()
 
         for page in data.get("query", {}).get("pages", {}).values():
+
             image_info = page.get("imageinfo", [])
 
-            if image_info:
-                images.append({
-                    "title": page.get("title", ""),
-                    "url": image_info[0].get("url", ""),
-                })
+            if not image_info:
+                continue
 
-        return images
+            info = image_info[0]
+
+            if not info.get("mime", "").startswith("image/"):
+                continue
+
+            title = page.get("title", "")
+
+            if title in seen_titles:
+                continue
+
+            image_url = info.get("thumburl") or info.get("url", "")
+
+            if not image_url:
+                continue
+
+            images.append({
+                "title": title,
+                "url": image_url,
+            })
+
+            seen_titles.add(title)
+
+        next_continuation = data.get("continue")
+
+        return images, next_continuation
 
     except Exception:
-        return []
+        return [], None
 
 st.set_page_config(
     page_title="TripGenie AI",
@@ -397,27 +428,12 @@ IMPORTANT:
 
         answer = response.text
 
-        images = search_wikimedia_images(destination, limit=3)
+        # ---------- Destination Images ----------
+        images, continuation = search_wikimedia_images(destination, limit=6)
 
-        if images:
-            st.markdown("### 📸 Destination Highlights")
-
-        image_cols = st.columns(len(images))
-
-        for col, image in zip(image_cols, images):
-            with col:
-                st.image(
-                    image["url"],
-                    width="stretch"
-                )
-
-                title = image["title"].replace("File:", "").strip()
-
-                st.caption(f"📷 {title}")
-
-                st.markdown(
-                    f"[View source on Wikimedia Commons]({image['url']})"
-                )
+        st.session_state.gallery_images = images
+        st.session_state.gallery_continuation = continuation
+        st.session_state.gallery_query = destination
                 
 
         left, right = st.columns([3.4, 1], gap="large")
@@ -464,6 +480,56 @@ IMPORTANT:
             st.code(error_text)
 
 st.divider()
+# ---------- Paginated Destination Gallery ----------
+
+if "gallery_images" in st.session_state and st.session_state.gallery_images:
+
+    st.markdown("### 📸 Destination Highlights")
+
+    gallery_images = st.session_state.gallery_images
+
+    image_cols = st.columns(3)
+
+    for index, image in enumerate(gallery_images):
+
+        with image_cols[index % 3]:
+
+            st.image(
+                image["url"],
+                width="stretch"
+            )
+
+            title = image["title"].replace("File:", "").strip()
+
+            st.caption(f"📷 {title}")
+
+            st.markdown(
+                f"[View source on Wikimedia Commons]({image['url']})"
+            )
+
+    if st.session_state.get("gallery_continuation"):
+
+        if st.button("🔄 Load More Images"):
+
+            more_images, next_continuation = search_wikimedia_images(
+                st.session_state.gallery_query,
+                limit=6,
+                continuation=st.session_state.gallery_continuation
+            )
+
+            existing_titles = {
+                image["title"]
+                for image in st.session_state.gallery_images
+            }
+
+            for image in more_images:
+
+                if image["title"] not in existing_titles:
+                    st.session_state.gallery_images.append(image)
+
+            st.session_state.gallery_continuation = next_continuation
+
+            st.rerun()
 st.caption(
     "TripGenie AI • FFE TiE Entrepreneurship Program 2026 • "
     "AI-powered travel planning prototype"
