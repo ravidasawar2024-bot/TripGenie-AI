@@ -78,6 +78,32 @@ def search_wikimedia_images(query, limit=6, continuation=None):
     except Exception:
         return [], None
 
+def extract_attractions(text):
+    marker = "<!--TRIPGENIE_ATTRACTIONS:"
+    end_marker = "-->"
+
+    start = text.find(marker)
+
+    if start == -1:
+        return []
+
+    end = text.find(end_marker, start)
+
+    if end == -1:
+        return []
+
+    attractions_text = text[
+        start + len(marker):end
+    ].strip()
+
+    attractions = [
+        item.strip()
+        for item in attractions_text.split("|")
+        if item.strip()
+    ]
+
+    return attractions[:5]
+
 st.set_page_config(
     page_title="TripGenie AI",
     page_icon="✈️",
@@ -408,6 +434,12 @@ Give six concise tips covering transport, timing, local etiquette, safety and bu
 
 Give three replacement activities.
 
+At the very end of your response, add this exact machine-readable line:
+
+<!--TRIPGENIE_ATTRACTIONS: Attraction 1 | Attraction 2 | Attraction 3 | Attraction 4 | Attraction 5-->
+
+Choose exactly 5 major, recognizable tourist attractions that are genuinely associated with the destination. Do not include generic categories such as restaurants, shopping areas, office districts, markets, or city views.
+
 IMPORTANT:
 - Make the itinerary useful rather than generic.
 - Prefer realistic sequencing over listing famous places randomly.
@@ -428,12 +460,20 @@ IMPORTANT:
 
         answer = response.text
 
+        attractions = extract_attractions(answer)
+
+        if not attractions:
+            attractions = [destination]
+
         # ---------- Destination Images ----------
-        images, continuation = search_wikimedia_images(destination, limit=6)
+        images, continuation = search_wikimedia_images(attractions[0], limit=6)
 
         st.session_state.gallery_images = images
         st.session_state.gallery_continuation = continuation
-        st.session_state.gallery_query = destination
+        st.session_state.gallery_query = attractions[0]
+
+        st.session_state.gallery_attractions = attractions
+        st.session_state.gallery_attraction_index = 0
                 
 
         left, right = st.columns([3.4, 1], gap="large")
@@ -507,14 +547,26 @@ if "gallery_images" in st.session_state and st.session_state.gallery_images:
                 f"[View source on Wikimedia Commons]({image['url']})"
             )
 
-    if st.session_state.get("gallery_continuation"):
+    if (
+    st.session_state.get("gallery_attraction_index", 0) + 1
+    < len(st.session_state.get("gallery_attractions", []))
+):
 
         if st.button("🔄 Load More Images"):
 
+            current_index = st.session_state.get(
+                "gallery_attraction_index", 0
+            )
+
+            next_index = current_index + 1
+
+            next_attraction = st.session_state.gallery_attractions[
+                next_index
+            ]
+
             more_images, next_continuation = search_wikimedia_images(
-                st.session_state.gallery_query,
-                limit=6,
-                continuation=st.session_state.gallery_continuation
+                next_attraction,
+                limit=6
             )
 
             existing_titles = {
@@ -527,6 +579,8 @@ if "gallery_images" in st.session_state and st.session_state.gallery_images:
                 if image["title"] not in existing_titles:
                     st.session_state.gallery_images.append(image)
 
+            st.session_state.gallery_attraction_index = next_index
+            st.session_state.gallery_query = next_attraction
             st.session_state.gallery_continuation = next_continuation
 
             st.rerun()
